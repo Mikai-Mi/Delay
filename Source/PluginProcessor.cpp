@@ -22,6 +22,9 @@ DelayAudioProcessor::DelayAudioProcessor()
                        )
 #endif
 {
+    addParameter(new juce::AudioParameterFloat("gain", "Gain", 0.0f, 1.0f, 1.0f));
+    addParameter(new juce::AudioParameterFloat("feedback", "Delay Feedback", 0.0f, 1.0f, 0.35f));
+    addParameter(new juce::AudioParameterFloat("mix", "Dry / Wet", 0.0f, 1.0f, 0.5f));
 }
 
 DelayAudioProcessor::~DelayAudioProcessor()
@@ -95,6 +98,12 @@ void DelayAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
     // Use this method as the place to do any pre-playback
     // initialisation that you need..
+
+    int delayMilliseconds = 200;
+    auto delaySamples = (int)std::round(sampleRate * delayMilliseconds / 1000.0);
+    delayBuffer.setSize(2, delaySamples);
+    delayBuffer.clear();
+    delayBufferPos = 0;
 }
 
 void DelayAudioProcessor::releaseResources()
@@ -150,13 +159,41 @@ void DelayAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
     // the samples and the outer loop is handling the channels.
     // Alternatively, you can process the samples with the channels
     // interleaved by keeping the same state.
+
+    //juce::AudioProcessorParameter* gainParameter = getParameters()[0];
+    //float gain = gainParameter->getValue();
+
+    auto& parameters = getParameters();
+    float gain = parameters[0]->getValue();
+    float feedback = parameters[1]->getValue();
+    float mix = parameters[2]->getValue();
+
+    int delayBufferSize = delayBuffer.getNumSamples();
+
     for (int channel = 0; channel < totalNumInputChannels; ++channel)
     {
-        auto* channelData = buffer.getWritePointer (channel);
+        float* channelData = buffer.getWritePointer (channel);
+        int delayPos = delayBufferPos;
 
         for (int i = 0; i < buffer.getNumSamples(); ++i) {
-            channelData[i] *= 0.2f;
+            float drySample = channelData[i];
+
+            float delaySample = delayBuffer.getSample(channel, delayPos) * feedback;
+            delayBuffer.setSample(channel, delayPos, drySample + delaySample);
+
+            delayPos++;
+            if (delayPos == delayBufferSize) {
+                delayPos = 0;
+            }
+            
+            channelData[i] = (drySample * (1.0f - mix)) + (delaySample * mix);
+            channelData[i] *= gain;
         }
+    }
+
+    delayBufferPos += buffer.getNumSamples();
+    if (delayBufferPos >= delayBufferSize) {
+        delayBufferPos -= delayBufferSize;
     }
 }
 
@@ -168,7 +205,8 @@ bool DelayAudioProcessor::hasEditor() const
 
 juce::AudioProcessorEditor* DelayAudioProcessor::createEditor()
 {
-    return new DelayAudioProcessorEditor (*this);
+    //return new DelayAudioProcessorEditor (*this);
+    return new juce::GenericAudioProcessorEditor(*this);
 }
 
 //==============================================================================
